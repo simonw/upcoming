@@ -1,3 +1,56 @@
+"""
+A simple Python module for accessing the Upcoming API.
+
+Example usage:
+
+>>> from upcoming_api import Upcoming
+>>> upcoming = Upcoming(YOUR_UPCOMING_API_KEY)
+>>> flickr_events = upcoming.search(search_text='flickr')
+>>> len(flickr_events)
+39
+>>> from pprint import pprint
+>>> pprint(flickr_events[1])
+{'category_id': 4,
+ 'date_posted': datetime.datetime(2006, 7, 14, 9, 58, 25),
+ 'description': 'All are welcome.  Bring your toys.  We&#39;ll be on the patio.',
+ 'end_date': None,
+ 'end_time': None,
+ 'id': 91569,
+ 'metro_id': '13',
+ 'name': 'Toronto Flickr Meetup',
+ 'personal': True,
+ 'selfpromotion': False,
+ 'start_date': datetime.date(2006, 7, 27),
+ 'start_time': datetime.time(19, 0),
+ 'user_id': 11021,
+ 'venue_id': 28279}
+>>> pprint(upcoming.venue.getInfo(flickr_events[1]['venue_id']))
+[{'address': '1296 Queen Street West',
+  'city': 'Toronto',
+  'description': '',
+  'id': 28279,
+  'name': 'Cadillac Lounge',
+  'phone': '',
+  'private': False,
+  'url': '',
+  'user_id': 63312,
+  'zip': ''}]
+
+If you're making a lot of calls to methods such as venue.getInfo which don't
+change very often, it's worth using the UpcomingCached class:
+
+>>> from upcoming_api import UpcomingCached
+>>> upcoming = UpcomingCached(YOUR_UPCOMING_API_KEY)
+>>> venue = upcoming.venue.getInfo(28729) # Makes an HTTP request
+>>> venue = upcoming.venue.getInfo(28729) # No request; uses cached information
+
+The cache currently uses an in-memory store; you can customise its behaviour
+by creating your own class matching the interface of the SimpleCache class
+and passing an instance of it as the second argument to the UpcomingCached
+constructor.
+
+"""
+
 import datetime, sys, urllib, re
 from xml.dom import minidom
 
@@ -433,20 +486,20 @@ class Upcoming:
 # down to a minimum.
 
 class UpcomingCached(Upcoming):
-    def __init__(self, api_key, cache):
-        self.cache = cache
+    def __init__(self, api_key, cache = None):
+        self.cache = cache or SimpleCache()
         Upcoming.__init__(self, api_key)
 
     def callMethod(self, method, *args, **kw):
         if self.cachable(method):
             # Try the cache stuff
-            key = self.makeKey([method] + args, kw)
+            key = self.makeKey(*([method] + list(args)), **kw)
             hit = self.cache.get(key)
             if hit:
                 return hit
             else:
                 data = Upcoming.callMethod(self, method, *args, **kw)
-                self.cache.put(key, data)
+                self.cache.set(key, data)
                 return data
         # Wasn't cachable; run as normal
         return Upcoming.callMethod(self, method, *args, **kw)
@@ -459,11 +512,12 @@ class UpcomingCached(Upcoming):
         return True
 
     def makeKey(self, *args, **kw):
+        args = map(str, args)
         args.sort()
         s = ''.join(args)
         keys = kw.keys()
         keys.sort()
-        s += ['%s%s' % (key, kw[key]) for key in keys]
+        s += ''.join(['%s%s' % (key, kw[key]) for key in keys])
         return s
 
 class SimpleCache:
